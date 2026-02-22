@@ -9,18 +9,13 @@
     "Sun": 6.0
   },
   "work_log": {
-    "2026-02-21": 538.5211725234985
+    "2026-02-21": 296.8426949977875,
+    "2026-02-22": 33.895047426223755
   },
-  "todos": [
-    {
-      "text": "Capstone Update",
-      "due": "9999-12-31",
-      "done": false
-    },
-    {
-      "text": "Fuck your mom",
-      "due": "9999-12-31",
-      "done": false
-    }
-  ]
+  "todos": [],
+  "blacklist": {
+    "apps": [],
+    "sites": []
+  },
+  "streak_last": ""
 }
