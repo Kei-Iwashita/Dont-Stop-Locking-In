@@ -1088,7 +1088,7 @@ def build_ui():
                                 dpg.add_text(d, color = list(C_BRIGHT if i == today_idx else C_MUTED))
                                 dpg.add_input_float(
                                     tag = f"day_target_{d}",
-                                    default_value = app_data["day_targets"].get(d, 6.0),
+                                    default_value = app_data["day_targets"].get(d, 0.0),
                                     width = 52, step = 0, format = "%.1f",
                                     callback = lambda s, a, u: save_day_target(u[0], u[1]),
                                     user_data = (d, f"day_target_{d}")
