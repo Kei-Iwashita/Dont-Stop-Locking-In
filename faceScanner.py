@@ -14,7 +14,6 @@ import math
 import threading
 import queue
 import psutil
-import struct
 
 try:
     arduino = serial.Serial('COM5', 9600, timeout = 1)
@@ -119,7 +118,7 @@ def send(cmd):
 def load_data():
     global app_data, today_work_sec
     default = {
-        "day_targets": {d: 6.0 for d in DAYS},
+        "day_targets": {d: 0.0 for d in DAYS},
         "work_log": {},
         "todos": [],
         "blacklist": {"apps": [], "sites": []}
@@ -151,9 +150,9 @@ def get_streak():
     streak = 0
     day    = today
     while True:
-        target = app_data["day_targets"].get(DAYS[day.weekday()], 6.0) * 3600
+        target = app_data["day_targets"].get(DAYS[day.weekday()], 0.0) * 3600
         done   = log.get(str(day), 0.0)
-        if done >= target:
+        if target > 0 and done >= target:
             streak += 1
             day -= timedelta(days = 1)
         else:
@@ -246,57 +245,61 @@ def resolve_lnk_target(lnk_path):
             ["powershell", "-Command", ps_cmd],
             text = True, stderr = subprocess.DEVNULL
         ).strip()
-        if result:
-            target, _, args = result.partition("|")
-            target = target.strip()
-            args   = args.strip()
-            if "--processStart" in args:
-                return args.split("--processStart")[1].strip().split()[0]
-            if target:
-                if "://" in target:
-                    protocol = target.split("://")[0]
-                    if protocol.lower() not in ("http", "https", "mailto", "ftp"):
-                        return protocol + ".exe"
-                return os.path.basename(target)
+        target, _, args = result.partition("|")
+        target = target.strip()
+        args   = args.strip()
+        if "://" in target:
+            protocol = target.split("://")[0].lower()
+            if protocol not in ("http", "https", "mailto", "ftp"):
+                return protocol + ".exe"
+        elif "--processStart" in args:
+            return args.split("--processStart")[1].strip().split()[0]
+        elif target:
+            return os.path.basename(target)
     except Exception:
         pass
     return None
 
 def pick_app_from_shortcut():
-    import tkinter as tk
-    from tkinter import filedialog
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
 
-    home = os.path.expanduser("~")
-    desktop = os.path.join(home, "Desktop")
-    if not os.path.exists(desktop):
-        for sub in os.listdir(home):
-            candidate = os.path.join(home, sub, "Desktop")
-            if os.path.exists(candidate):
-                desktop = candidate
-                break
+        home = os.path.expanduser("~")
+        desktop = os.path.join(home, "Desktop")
+        if not os.path.exists(desktop):
+            for sub in os.listdir(home):
+                candidate = os.path.join(home, sub, "Desktop")
+                if os.path.exists(candidate):
+                    desktop = candidate
+                    break
 
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-    path = filedialog.askopenfilename(
-        parent = root,
-        initialdir = desktop if os.path.exists(desktop) else home,
-        title = "Select a shortcut or executable to block",
-        filetypes = [("All supported", "*.lnk *.exe *.url"), ("Shortcuts", "*.lnk"), ("Executables", "*.exe"), ("URL Shortcuts", "*.url"), ("All files", "*.*")]
-    )
-    root.destroy()
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        path = filedialog.askopenfilename(
+            parent = root,
+            initialdir = desktop if os.path.exists(desktop) else home,
+            title = "Select a shortcut or executable to block",
+            filetypes = [("All files", "*.*"), ("Shortcuts", "*.lnk"), ("Executables", "*.exe"), ("URL Shortcuts", "*.url")]
+        )
+        root.destroy()
 
-    if not path:
-        return
-    if path.lower().endswith(".lnk"):
-        exe = resolve_lnk_target(path)
-    elif path.lower().endswith(".url"):
-        exe = resolve_url_target(path)
-    else:
-        exe = os.path.basename(path)
-    if exe:
-        dpg.set_value("new_app_input", exe)
-        add_banned_app()
+        if not path:
+            return
+
+        if path.lower().endswith(".lnk"):
+            exe = resolve_lnk_target(path)
+        elif path.lower().endswith(".url"):
+            exe = resolve_url_target(path)
+        else:
+            exe = os.path.basename(path)
+
+        if exe:
+            dpg.set_value("new_app_input", exe)
+            add_banned_app()
+    except Exception:
+        pass
 
 def add_banned_app(sender = None, app_data_val = None):
     name = dpg.get_value("new_app_input").strip()
@@ -1088,7 +1091,7 @@ def build_ui():
                                 dpg.add_text(d, color = list(C_BRIGHT if i == today_idx else C_MUTED))
                                 dpg.add_input_float(
                                     tag = f"day_target_{d}",
-                                    default_value = app_data["day_targets"].get(d, 0.0),
+                                    default_value = app_data["day_targets"].get(d, 6.0),
                                     width = 52, step = 0, format = "%.1f",
                                     callback = lambda s, a, u: save_day_target(u[0], u[1]),
                                     user_data = (d, f"day_target_{d}")
