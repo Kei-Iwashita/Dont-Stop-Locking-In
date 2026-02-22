@@ -1,21 +1,32 @@
 {
   "day_targets": {
-    "Mon": 6.0,
-    "Tue": 6.0,
-    "Wed": 6.0,
-    "Thu": 6.0,
-    "Fri": 6.0,
+    "Mon": 4.0,
+    "Tue": 4.0,
+    "Wed": 4.0,
+    "Thu": 4.0,
+    "Fri": 4.0,
     "Sat": 6.0,
     "Sun": 6.0
   },
   "work_log": {
     "2026-02-21": 296.8426949977875,
-    "2026-02-22": 33.895047426223755
+    "2026-02-22": 1866.4849433898926
   },
   "todos": [],
   "blacklist": {
-    "apps": [],
-    "sites": []
+    "apps": [
+      "Signal.exe",
+      "steam.exe",
+      "studio64.exe",
+      "WinSCP.exe"
+    ],
+    "sites": [
+      "reddit.com",
+      "discord.com",
+      "youtube.com",
+      "instagram.com",
+      "google.com"
+    ]
   },
   "streak_last": ""
 }

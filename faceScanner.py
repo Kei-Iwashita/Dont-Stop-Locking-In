@@ -14,9 +14,10 @@ import math
 import threading
 import queue
 import psutil
+import struct
 
 try:
-    arduino = serial.Serial('COM5', 9600, timeout=1)
+    arduino = serial.Serial('COM5', 9600, timeout = 1)
     time.sleep(2)
     ARDUINO = True
 except Exception:
@@ -78,7 +79,7 @@ C_BRIGHT = (210, 215, 255, 255)
 C_DIM    = (30,  30,  60, 255)
 C_TITLE  = (230, 235, 255, 255)
 
-frame_queue          = queue.Queue(maxsize=2)
+frame_queue          = queue.Queue(maxsize = 2)
 gaze_status          = "Initializing"
 flash_overlay        = False
 camera_running       = True
@@ -139,7 +140,7 @@ def save_data():
     app_data["work_log"][str(date.today())] = today_work_sec
     try:
         with open(DATA_FILE, "w") as f:
-            json.dump(app_data, f, indent=2)
+            json.dump(app_data, f, indent = 2)
     except Exception:
         pass
 
@@ -154,7 +155,7 @@ def get_streak():
         done   = log.get(str(day), 0.0)
         if done >= target:
             streak += 1
-            day -= timedelta(days=1)
+            day -= timedelta(days = 1)
         else:
             break
     return streak
@@ -168,8 +169,18 @@ def get_blacklist():
 
 def write_hosts(sites):
     try:
-        with open(HOSTS_PATH, "r") as f:
-            lines = [l for l in f.readlines() if HOSTS_MARKER not in l]
+        with open(HOSTS_PATH, "r", newline="") as f:
+            raw = f.read()
+        raw = raw.replace("\r\n", "\n").replace("\r", "\n")
+        in_block = False
+        kept = []
+        for l in raw.split("\n"):
+            if HOSTS_MARKER in l:
+                in_block = True
+                continue
+            if not in_block:
+                kept.append(l)
+        lines = [l + "\n" for l in kept if l.strip()]
         with open(HOSTS_PATH, "w") as f:
             f.writelines(lines)
             if sites:
@@ -179,8 +190,10 @@ def write_hosts(sites):
                     f.write(f"127.0.0.1 {s}\n")
                     if not s.startswith("www."):
                         f.write(f"127.0.0.1 www.{s}\n")
+        os.system("ipconfig /flushdns")
     except PermissionError:
-        pass
+        if dpg.does_item_exist("gaze_label"):
+            dpg.set_value("gaze_label", "⚠ Run as administrator for website blocking")
 
 
 def clear_hosts():
@@ -206,7 +219,86 @@ def blacklist_thread_fn():
         time.sleep(3)
 
 
-def add_banned_app(sender=None, app_data_val=None):
+def resolve_url_target(url_path):
+    try:
+        with open(url_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line.lower().startswith("url="):
+                    url = line[4:].strip()
+                    protocol = url.split("://")[0]
+                    if protocol and protocol.lower() not in ("http", "https", "mailto", "ftp"):
+                        return protocol + ".exe"
+    except Exception:
+        pass
+    return None
+
+
+def resolve_lnk_target(lnk_path):
+    try:
+        import subprocess
+        lnk_path_ps = lnk_path.replace("'", "\'")
+        ps_cmd = (
+            f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{lnk_path_ps}');"
+            f"Write-Output ($s.TargetPath + '|' + $s.Arguments)"
+        )
+        result = subprocess.check_output(
+            ["powershell", "-Command", ps_cmd],
+            text = True, stderr = subprocess.DEVNULL
+        ).strip()
+        if result:
+            target, _, args = result.partition("|")
+            target = target.strip()
+            args   = args.strip()
+            if "--processStart" in args:
+                return args.split("--processStart")[1].strip().split()[0]
+            if target:
+                if "://" in target:
+                    protocol = target.split("://")[0]
+                    if protocol.lower() not in ("http", "https", "mailto", "ftp"):
+                        return protocol + ".exe"
+                return os.path.basename(target)
+    except Exception:
+        pass
+    return None
+
+def pick_app_from_shortcut():
+    import tkinter as tk
+    from tkinter import filedialog
+
+    home = os.path.expanduser("~")
+    desktop = os.path.join(home, "Desktop")
+    if not os.path.exists(desktop):
+        for sub in os.listdir(home):
+            candidate = os.path.join(home, sub, "Desktop")
+            if os.path.exists(candidate):
+                desktop = candidate
+                break
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    path = filedialog.askopenfilename(
+        parent = root,
+        initialdir = desktop if os.path.exists(desktop) else home,
+        title = "Select a shortcut or executable to block",
+        filetypes = [("All supported", "*.lnk *.exe *.url"), ("Shortcuts", "*.lnk"), ("Executables", "*.exe"), ("URL Shortcuts", "*.url"), ("All files", "*.*")]
+    )
+    root.destroy()
+
+    if not path:
+        return
+    if path.lower().endswith(".lnk"):
+        exe = resolve_lnk_target(path)
+    elif path.lower().endswith(".url"):
+        exe = resolve_url_target(path)
+    else:
+        exe = os.path.basename(path)
+    if exe:
+        dpg.set_value("new_app_input", exe)
+        add_banned_app()
+
+def add_banned_app(sender = None, app_data_val = None):
     name = dpg.get_value("new_app_input").strip()
     if not name:
         return
@@ -229,7 +321,7 @@ def remove_banned_app(idx):
     render_blacklist()
 
 
-def add_banned_site(sender=None, app_data_val=None):
+def add_banned_site(sender = None, app_data_val = None):
     name = dpg.get_value("new_site_input").strip().lower()
     name = name.replace("https://", "").replace("http://", "").replace("www.", "").strip("/")
     if not name:
@@ -258,22 +350,22 @@ def remove_banned_site(idx):
 def render_blacklist():
     if not dpg.does_item_exist("bl_app_list"):
         return
-    dpg.delete_item("bl_app_list",  children_only=True)
-    dpg.delete_item("bl_site_list", children_only=True)
+    dpg.delete_item("bl_app_list",  children_only = True)
+    dpg.delete_item("bl_site_list", children_only = True)
     bl = get_blacklist()
     for i, app in enumerate(bl["apps"]):
-        with dpg.group(horizontal=True, parent="bl_app_list"):
-            dpg.add_text(app, color=list(C_TEXT))
-            dpg.add_button(label=" × ", small=True,
-                           callback=lambda s, a, u: remove_banned_app(u),
-                           user_data=i)
+        with dpg.group(horizontal = True, parent = "bl_app_list"):
+            dpg.add_text(app, color = list(C_TEXT))
+            dpg.add_button(label = " × ", small = True,
+                           callback = lambda s, a, u: remove_banned_app(u),
+                           user_data = i)
             dpg.bind_item_theme(dpg.last_item(), "delete_btn")
     for i, site in enumerate(bl["sites"]):
-        with dpg.group(horizontal=True, parent="bl_site_list"):
-            dpg.add_text(site, color=list(C_TEXT))
-            dpg.add_button(label=" × ", small=True,
-                           callback=lambda s, a, u: remove_banned_site(u),
-                           user_data=i)
+        with dpg.group(horizontal = True, parent = "bl_site_list"):
+            dpg.add_text(site, color = list(C_TEXT))
+            dpg.add_button(label = " × ", small = True,
+                           callback = lambda s, a, u: remove_banned_site(u),
+                           user_data = i)
             dpg.bind_item_theme(dpg.last_item(), "delete_btn")
 
 
@@ -298,8 +390,8 @@ def process_frame(frame):
     global gaze_status, flash_overlay, away_since, servo_rotated, last_sent_secs, session_failed
 
     h, w     = frame.shape[:2]
-    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB,
-                        data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    mp_image = mp.Image(image_format = mp.ImageFormat.SRGB,
+                        data = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     result   = detector.detect(mp_image)
 
     looking_away = False
@@ -443,7 +535,7 @@ def frame_to_texture(frame):
 
 
 
-def arc_pts(cx, cy, r, start_deg, end_deg, steps=80):
+def arc_pts(cx, cy, r, start_deg, end_deg, steps = 80):
     pts = []
     for i in range(steps + 1):
         t = math.radians(start_deg + (end_deg - start_deg) * i / steps)
@@ -453,13 +545,13 @@ def arc_pts(cx, cy, r, start_deg, end_deg, steps=80):
 
 def centered_draw_text(parent, cx, y, text, color, size):
     approx_w = len(text) * size * 0.52
-    dpg.draw_text([cx - approx_w / 2, y], text, color=color, size=size, parent=parent)
+    dpg.draw_text([cx - approx_w / 2, y], text, color = color, size = size, parent = parent)
 
 
 def redraw_wheel():
     if not dpg.does_item_exist("wheel_draw"):
         return
-    dpg.delete_item("wheel_draw", children_only=True)
+    dpg.delete_item("wheel_draw", children_only = True)
 
     today_day  = DAYS[date.today().weekday()]
     target_sec = app_data["day_targets"].get(today_day, 6.0) * 3600
@@ -468,13 +560,13 @@ def redraw_wheel():
     frac       = remaining / target_sec if target_sec > 0 else 0.0
 
     cx, cy, r = 150, 155, 100
-    dpg.draw_circle([cx, cy], r, color=C_DIM, thickness=14, parent="wheel_draw")
+    dpg.draw_circle([cx, cy], r, color = C_DIM, thickness = 14, parent = "wheel_draw")
     if frac > 0.005:
         color = C_GREEN if frac > 0.3 else (C_ORANGE if frac > 0.1 else C_RED)
         end_d = -90 + (-360 * frac)
         pts   = arc_pts(cx, cy, r, -90, end_d if frac < 1.0 else -90 - 359.9)
         if len(pts) > 1:
-            dpg.draw_polyline(pts, color=color, thickness=14, parent="wheel_draw")
+            dpg.draw_polyline(pts, color = color, thickness = 14, parent = "wheel_draw")
 
     rem_h    = int(remaining) // 3600
     rem_m    = (int(remaining) % 3600) // 60
@@ -490,11 +582,11 @@ def redraw_wheel():
     streak     = get_streak()
     streak_col = C_GREEN if streak >= 7 else (C_ORANGE if streak >= 3 else C_BRIGHT)
     if dpg.does_item_exist("streak_number"):
-        dpg.configure_item("streak_number", default_value=str(streak), color=list(streak_col))
+        dpg.configure_item("streak_number", default_value = str(streak), color = list(streak_col))
         if has_title_font:
             dpg.bind_item_font("streak_number", "big_font")
     if dpg.does_item_exist("streak_sublabel"):
-        dpg.configure_item("streak_sublabel", color=list(streak_col))
+        dpg.configure_item("streak_sublabel", color = list(streak_col))
         if has_title_font:
             dpg.bind_item_font("streak_sublabel", "streak_font")
 
@@ -502,22 +594,22 @@ def redraw_wheel():
 def redraw_session_bar():
     if not dpg.does_item_exist("sess_bar_draw"):
         return
-    dpg.delete_item("sess_bar_draw", children_only=True)
+    dpg.delete_item("sess_bar_draw", children_only = True)
     W = 480
-    dpg.draw_rectangle([0, 0], [W, 5], color=(0,0,0,0), fill=C_BORDER, parent="sess_bar_draw")
+    dpg.draw_rectangle([0, 0], [W, 5], color = (0,0,0,0), fill = C_BORDER, parent = "sess_bar_draw")
     if session_state == "WORKING" and session_total > 0:
         frac  = session_remaining / session_total
         color = C_GREEN if frac > 0.3 else (C_ORANGE if frac > 0.1 else C_RED)
-        dpg.draw_rectangle([0,0],[int(W*frac),5], color=(0,0,0,0), fill=color, parent="sess_bar_draw")
+        dpg.draw_rectangle([0,0],[int(W*frac),5], color = (0,0,0,0), fill = color, parent = "sess_bar_draw")
     elif session_state == "BREAK" and break_total > 0:
         frac = break_remaining / break_total
-        dpg.draw_rectangle([0,0],[int(W*frac),5], color=(0,0,0,0), fill=C_ACCENT, parent="sess_bar_draw")
+        dpg.draw_rectangle([0,0],[int(W*frac),5], color = (0,0,0,0), fill = C_ACCENT, parent = "sess_bar_draw")
 
     if total_session_secs > 0 and dpg.does_item_exist("total_prog_draw"):
-        dpg.delete_item("total_prog_draw", children_only=True)
+        dpg.delete_item("total_prog_draw", children_only = True)
         frac2 = min(1.0, total_elapsed_secs / total_session_secs)
-        dpg.draw_rectangle([0,0],[W,5], color=(0,0,0,0), fill=C_BORDER, parent="total_prog_draw")
-        dpg.draw_rectangle([0,0],[int(W*frac2),5], color=(0,0,0,0), fill=C_ACCENT, parent="total_prog_draw")
+        dpg.draw_rectangle([0,0],[W,5], color = (0,0,0,0), fill = C_BORDER, parent = "total_prog_draw")
+        dpg.draw_rectangle([0,0],[int(W*frac2),5], color = (0,0,0,0), fill = C_ACCENT, parent = "total_prog_draw")
 
 
 def update_cycle_label():
@@ -541,15 +633,15 @@ def update_cycle_label():
 def render_todos():
     if not dpg.does_item_exist("todo_list"):
         return
-    dpg.delete_item("todo_list", children_only=True)
+    dpg.delete_item("todo_list", children_only = True)
     today = date.today()
 
     for i, item in enumerate(app_data["todos"]):
-        with dpg.group(horizontal=True, parent="todo_list"):
-            dpg.add_checkbox(default_value=item["done"],
-                             callback=lambda s, a, u: toggle_todo(u),
-                             user_data=i)
-            dpg.add_text(item["text"], color=list(C_MUTED if item["done"] else C_TEXT))
+        with dpg.group(horizontal = True, parent = "todo_list"):
+            dpg.add_checkbox(default_value = item["done"],
+                             callback = lambda s, a, u: toggle_todo(u),
+                             user_data = i)
+            dpg.add_text(item["text"], color = list(C_MUTED if item["done"] else C_TEXT))
             due = item.get("due", "9999-12-31")
             if due != "9999-12-31":
                 try:
@@ -565,17 +657,17 @@ def render_todos():
                         badge_col, label = C_BORDER,        f" {days_diff}d left "
                 except ValueError:
                     badge_col, label = C_BORDER, f" {due} "
-                dpg.add_button(label=label, small=True, callback=lambda: None)
+                dpg.add_button(label = label, small = True, callback = lambda: None)
                 dpg.bind_item_theme(dpg.last_item(), make_badge_theme(badge_col))
-            dpg.add_button(label=" × ", small=True,
-                           callback=lambda s, a, u: delete_todo(u), user_data=i)
+            dpg.add_button(label = " × ", small = True,
+                           callback = lambda s, a, u: delete_todo(u), user_data = i)
             dpg.bind_item_theme(dpg.last_item(), "delete_btn")
 
 
 def make_badge_theme(color):
     tag = f"badge_{color[0]}_{color[1]}_{color[2]}"
     if not dpg.does_item_exist(tag):
-        with dpg.theme(tag=tag):
+        with dpg.theme(tag = tag):
             with dpg.theme_component(dpg.mvButton):
                 dpg.add_theme_color(dpg.mvThemeCol_Button,        color)
                 dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered,  color)
@@ -586,7 +678,7 @@ def make_badge_theme(color):
 
 def toggle_todo(idx):
     app_data["todos"][idx]["done"] = not app_data["todos"][idx]["done"]
-    app_data["todos"].sort(key=lambda t: (t["done"], t.get("due", "9999-12-31")))
+    app_data["todos"].sort(key = lambda t: (t["done"], t.get("due", "9999-12-31")))
     save_data()
     render_todos()
 
@@ -618,7 +710,7 @@ def add_todo_cb():
     except ValueError:
         due = "9999-12-31"
     app_data["todos"].append({"text": text, "due": due, "done": False})
-    app_data["todos"].sort(key=lambda t: (t["done"], t.get("due", "9999-12-31")))
+    app_data["todos"].sort(key = lambda t: (t["done"], t.get("due", "9999-12-31")))
     save_data()
     dpg.set_value("todo_text_input", "")
     dpg.set_value("todo_due_input",  "")
@@ -634,10 +726,10 @@ def set_preset(work_min, break_min):
 
 def no_break_changed(sender, app_data_val):
     show = not app_data_val
-    dpg.configure_item("break_min_input", show=show)
-    dpg.configure_item("break_min_label", show=show)
-    dpg.configure_item("work_min_input",  show=show)
-    dpg.configure_item("work_min_label",  show=show)
+    dpg.configure_item("break_min_input", show = show)
+    dpg.configure_item("break_min_label", show = show)
+    dpg.configure_item("work_min_input",  show = show)
+    dpg.configure_item("work_min_label",  show = show)
 
 
 def start_session():
@@ -667,6 +759,7 @@ def start_session():
         session_remaining = session_total
         session_paused    = False
         last_tick_time    = time.time()
+        write_hosts(get_blacklist()["sites"])
 
     refresh_session_ui()
 
@@ -677,7 +770,7 @@ def pause_session():
         session_paused = not session_paused
         if not session_paused:
             last_tick_time = time.time()
-        dpg.configure_item("pause_btn", label="Resume" if session_paused else "Pause")
+        dpg.configure_item("pause_btn", label = "Resume" if session_paused else "Pause")
 
 
 def stop_session():
@@ -704,31 +797,31 @@ def refresh_session_ui():
     active = s != "IDLE"
     locked = dpg.get_value("no_terminate_check")
 
-    dpg.configure_item("session_config_group", show=not active)
-    dpg.configure_item("session_active_group", show=active)
+    dpg.configure_item("session_config_group", show = not active)
+    dpg.configure_item("session_active_group", show = active)
 
-    dpg.configure_item("no_terminate_check", enabled=not active)
+    dpg.configure_item("no_terminate_check", enabled = not active)
 
     if s == "IDLE":
-        dpg.configure_item("start_btn", label="Initiate",      enabled=True)
+        dpg.configure_item("start_btn", label = "Initiate",      enabled = True)
     elif s == "BREAK":
-        dpg.configure_item("start_btn", label="Skip recovery", enabled=True)
+        dpg.configure_item("start_btn", label = "Skip recovery", enabled = True)
     else:
-        dpg.configure_item("start_btn", label="Initiate",      enabled=False)
+        dpg.configure_item("start_btn", label = "Initiate",      enabled = False)
 
-    dpg.configure_item("pause_btn", enabled=active)
+    dpg.configure_item("pause_btn", enabled = active)
     if not active:
-        dpg.configure_item("pause_btn", label="Pause")
+        dpg.configure_item("pause_btn", label = "Pause")
 
-    dpg.configure_item("stop_btn", show=not locked)
+    dpg.configure_item("stop_btn", show = not locked)
 
     if active:
         if s == "WORKING":
             dpg.set_value("state_label", "Active")
-            dpg.configure_item("state_label", color=list(C_GREEN))
+            dpg.configure_item("state_label", color = list(C_GREEN))
         elif s == "BREAK":
             dpg.set_value("state_label", "Recovery")
-            dpg.configure_item("state_label", color=list(C_ACCENT))
+            dpg.configure_item("state_label", color = list(C_ACCENT))
 
     update_cycle_label()
 
@@ -766,7 +859,7 @@ def tick():
             total_elapsed_secs += dt
             m, s               = divmod(int(session_remaining), 60)
             dpg.set_value("timer_label", f"{m:02d}:{s:02d}")
-            dpg.configure_item("timer_label", color=list(C_GREEN))
+            dpg.configure_item("timer_label", color = list(C_GREEN))
             redraw_wheel()
             update_cycle_label()
 
@@ -781,6 +874,7 @@ def tick():
                     session_state   = "BREAK"
                     break_remaining = break_total
                     last_tick_time  = time.time()
+                    clear_hosts()
                 refresh_session_ui()
 
         elif session_state == "BREAK":
@@ -788,7 +882,7 @@ def tick():
             total_elapsed_secs += dt
             m, s               = divmod(int(break_remaining), 60)
             dpg.set_value("timer_label", f"{m:02d}:{s:02d}")
-            dpg.configure_item("timer_label", color=list(C_ACCENT))
+            dpg.configure_item("timer_label", color = list(C_ACCENT))
             update_cycle_label()
 
             if break_remaining <= 0:
@@ -799,6 +893,7 @@ def tick():
                     session_state     = "WORKING"
                     session_remaining = session_total
                     last_tick_time    = time.time()
+                    write_hosts(get_blacklist()["sites"])
                 refresh_session_ui()
 
     redraw_session_bar()
@@ -828,17 +923,17 @@ def setup_themes():
         loaded = False
         for fp in font_paths:
             try:
-                dpg.add_font(fp, 15, tag="ui_font")
-                dpg.add_font(fp, 16, tag="title_font")
-                dpg.add_font(fp, 48, tag="big_font")
-                dpg.add_font(fp, 18, tag="streak_font")
+                dpg.add_font(fp, 15, tag = "ui_font")
+                dpg.add_font(fp, 16, tag = "title_font")
+                dpg.add_font(fp, 48, tag = "big_font")
+                dpg.add_font(fp, 18, tag = "streak_font")
                 loaded = True
                 break
             except Exception:
                 continue
         has_title_font = loaded
 
-    with dpg.theme(tag="global_theme"):
+    with dpg.theme(tag = "global_theme"):
         with dpg.theme_component(dpg.mvAll):
             dpg.add_theme_color(dpg.mvThemeCol_WindowBg,        C_BG)
             dpg.add_theme_color(dpg.mvThemeCol_ChildBg,         C_PANEL)
@@ -857,7 +952,7 @@ def setup_themes():
             dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing,     8, 6)
             dpg.add_theme_style(dpg.mvStyleVar_WindowPadding,   12, 12)
 
-    with dpg.theme(tag="green_btn"):
+    with dpg.theme(tag = "green_btn"):
         with dpg.theme_component(dpg.mvButton):
             dpg.add_theme_color(dpg.mvThemeCol_Button,         C_GREEN)
             dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered,  (20, 220, 150, 255))
@@ -865,7 +960,7 @@ def setup_themes():
             dpg.add_theme_color(dpg.mvThemeCol_Text,           (0, 0, 0, 255))
             dpg.add_theme_style(dpg.mvStyleVar_FrameRounding,  6)
 
-    with dpg.theme(tag="red_btn"):
+    with dpg.theme(tag = "red_btn"):
         with dpg.theme_component(dpg.mvButton):
             dpg.add_theme_color(dpg.mvThemeCol_Button,         C_RED)
             dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered,  (255, 80, 110, 255))
@@ -873,14 +968,14 @@ def setup_themes():
             dpg.add_theme_color(dpg.mvThemeCol_Text,           (255, 255, 255, 255))
             dpg.add_theme_style(dpg.mvStyleVar_FrameRounding,  6)
 
-    with dpg.theme(tag="accent_btn"):
+    with dpg.theme(tag = "accent_btn"):
         with dpg.theme_component(dpg.mvButton):
             dpg.add_theme_color(dpg.mvThemeCol_Button,         C_ACCENT)
             dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered,  (110, 115, 255, 255))
             dpg.add_theme_color(dpg.mvThemeCol_ButtonActive,   (70,  74, 200, 255))
             dpg.add_theme_style(dpg.mvStyleVar_FrameRounding,  6)
 
-    with dpg.theme(tag="delete_btn"):
+    with dpg.theme(tag = "delete_btn"):
         with dpg.theme_component(dpg.mvButton):
             dpg.add_theme_color(dpg.mvThemeCol_Button,         C_PANEL)
             dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered,  C_RED)
@@ -893,7 +988,7 @@ def setup_themes():
 
 
 def add_title(label):
-    t = dpg.add_text(label, color=list(C_TITLE))
+    t = dpg.add_text(label, color = list(C_TITLE))
     if has_title_font:
         dpg.bind_item_font(t, "title_font")
     dpg.add_separator()
@@ -903,147 +998,149 @@ def add_title(label):
 
 def build_ui():
     with dpg.texture_registry():
-        default_tex = np.zeros((CAM_H, CAM_W, 4), dtype=np.float32).ravel()
-        dpg.add_dynamic_texture(CAM_W, CAM_H, default_tex, tag="cam_texture")
+        default_tex = np.zeros((CAM_H, CAM_W, 4), dtype = np.float32).ravel()
+        dpg.add_dynamic_texture(CAM_W, CAM_H, default_tex, tag = "cam_texture")
 
-    with dpg.window(tag="main", no_title_bar=True, no_resize=True,
-                    no_move=True, no_scrollbar=True):
-        with dpg.group(horizontal=True):
+    with dpg.window(tag = "main", no_title_bar = True, no_resize = True,
+                    no_move = True, no_scrollbar = True):
+        with dpg.group(horizontal = True):
 
             with dpg.group():
-                with dpg.child_window(width=660, height=520, border=True):
+                with dpg.child_window(width = 660, height = 520, border = True):
                     add_title("Face scanner")
-                    dpg.add_image("cam_texture", width=640, height=460)
-                    dpg.add_text("", tag="gaze_label", color=list(C_MUTED))
+                    dpg.add_image("cam_texture", width = 640, height = 460)
+                    dpg.add_text("", tag = "gaze_label", color = list(C_MUTED))
 
-                with dpg.child_window(width=660, height=315, border=True):
+                with dpg.child_window(width = 660, height = 315, border = True):
                     add_title("Session")
 
-                    with dpg.group(tag="session_config_group"):
-                        dpg.add_spacer(height=4)
-                        with dpg.group(horizontal=True):
-                            p1 = dpg.add_button(label="52/17 - DeskTime method",
-                                                callback=lambda: set_preset(52, 17))
+                    with dpg.group(tag = "session_config_group"):
+                        dpg.add_spacer(height = 4)
+                        with dpg.group(horizontal = True):
+                            p1 = dpg.add_button(label = "52/17 - DeskTime method",
+                                                callback = lambda: set_preset(52, 17))
                             dpg.bind_item_theme(p1, "accent_btn")
-                            p2 = dpg.add_button(label="90/20 - Ultradian rhythm",
-                                                callback=lambda: set_preset(90, 20))
+                            p2 = dpg.add_button(label = "90/20 - Ultradian rhythm",
+                                                callback = lambda: set_preset(90, 20))
                             dpg.bind_item_theme(p2, "accent_btn")
-                        dpg.add_spacer(height=8)
-                        with dpg.group(horizontal=True):
-                            dpg.add_text("Total min", color=list(C_MUTED))
-                            dpg.add_input_float(tag="total_mins_input", default_value=120,
-                                                width=60, step=0, format="%.0f")
-                            dpg.add_spacer(width=10)
-                            dpg.add_text("Work min", color=list(C_MUTED), tag="work_min_label")
-                            dpg.add_input_float(tag="work_min_input", default_value=90,
-                                                width=60, step=0, format="%.0f")
-                            dpg.add_spacer(width=10)
-                            dpg.add_text("Break min", color=list(C_MUTED), tag="break_min_label")
-                            dpg.add_input_float(tag="break_min_input", default_value=20,
-                                                width=60, step=0, format="%.0f")
-                            dpg.add_spacer(width=10)
-                            dpg.add_checkbox(label="No break", tag="no_break_check",
-                                             callback=no_break_changed)
+                        dpg.add_spacer(height = 8)
+                        with dpg.group(horizontal = True):
+                            dpg.add_text("Total min", color = list(C_MUTED))
+                            dpg.add_input_float(tag = "total_mins_input", default_value = 120,
+                                                width = 60, step = 0, format = "%.0f")
+                            dpg.add_spacer(width = 10)
+                            dpg.add_text("Work min", color = list(C_MUTED), tag = "work_min_label")
+                            dpg.add_input_float(tag = "work_min_input", default_value = 90,
+                                                width = 60, step = 0, format = "%.0f")
+                            dpg.add_spacer(width = 10)
+                            dpg.add_text("Break min", color = list(C_MUTED), tag = "break_min_label")
+                            dpg.add_input_float(tag = "break_min_input", default_value = 20,
+                                                width = 60, step = 0, format = "%.0f")
+                            dpg.add_spacer(width = 10)
+                            dpg.add_checkbox(label = "No break", tag = "no_break_check",
+                                             callback = no_break_changed)
 
-                    with dpg.group(tag="session_active_group", show=False):
-                        dpg.add_spacer(height=4)
-                        dpg.add_text("", tag="cycle_label", color=list(C_MUTED))
-                        dpg.add_text("", tag="state_label", color=list(C_MUTED))
-                        dpg.add_text("--:--", tag="timer_label", color=list(C_TEXT))
-                        dpg.add_spacer(height=2)
-                        dpg.add_text("Session", color=list(C_MUTED))
-                        dpg.add_drawlist(width=480, height=6, tag="sess_bar_draw")
-                        dpg.add_spacer(height=4)
-                        dpg.add_text("Total", color=list(C_MUTED))
-                        dpg.add_drawlist(width=480, height=6, tag="total_prog_draw")
+                    with dpg.group(tag = "session_active_group", show = False):
+                        dpg.add_spacer(height = 4)
+                        dpg.add_text("", tag = "cycle_label", color = list(C_MUTED))
+                        dpg.add_text("", tag = "state_label", color = list(C_MUTED))
+                        dpg.add_text("--:--", tag = "timer_label", color = list(C_TEXT))
+                        dpg.add_spacer(height = 2)
+                        dpg.add_text("Session", color = list(C_MUTED))
+                        dpg.add_drawlist(width = 480, height = 6, tag = "sess_bar_draw")
+                        dpg.add_spacer(height = 4)
+                        dpg.add_text("Total", color = list(C_MUTED))
+                        dpg.add_drawlist(width = 480, height = 6, tag = "total_prog_draw")
 
-                    dpg.add_spacer(height=10)
-                    with dpg.group(horizontal=True):
-                        sb = dpg.add_button(label="Initiate", tag="start_btn",
-                                            width=110, callback=start_session)
+                    dpg.add_spacer(height = 10)
+                    with dpg.group(horizontal = True):
+                        sb = dpg.add_button(label = "Initiate", tag = "start_btn",
+                                            width = 110, callback = start_session)
                         dpg.bind_item_theme(sb, "green_btn")
-                        dpg.add_button(label="Pause", tag="pause_btn",
-                                       width=90, callback=pause_session, enabled=False)
-                        tb = dpg.add_button(label="Terminate", tag="stop_btn",
-                                            width=110, callback=stop_session)
+                        dpg.add_button(label = "Pause", tag = "pause_btn",
+                                       width = 90, callback = pause_session, enabled = False)
+                        tb = dpg.add_button(label = "Terminate", tag = "stop_btn",
+                                            width = 110, callback = stop_session)
                         dpg.bind_item_theme(tb, "red_btn")
-                        dpg.add_spacer(width=10)
-                        dpg.add_checkbox(label="No terminate", tag="no_terminate_check",
-                                         callback=lambda s, a: refresh_session_ui())
+                        dpg.add_spacer(width = 10)
+                        dpg.add_checkbox(label = "No terminate", tag = "no_terminate_check",
+                                         callback = lambda s, a: refresh_session_ui())
 
             with dpg.group():
-                with dpg.child_window(width=500, height=520, border=True):
+                with dpg.child_window(width = 500, height = 520, border = True):
                     add_title("Daily work goal")
-                    dpg.add_spacer(height=8)
-                    with dpg.group(horizontal=True):
-                        dpg.add_drawlist(width=300, height=320, tag="wheel_draw")
-                        dpg.add_spacer(width=20)
+                    dpg.add_spacer(height = 8)
+                    with dpg.group(horizontal = True):
+                        dpg.add_drawlist(width = 300, height = 320, tag = "wheel_draw")
+                        dpg.add_spacer(width = 20)
                         with dpg.group():
-                            dpg.add_spacer(height=108)
-                            dpg.add_text("0", tag="streak_number", color=list(C_BRIGHT))
-                            dpg.add_spacer(height=4)
-                            dpg.add_text("day streak", tag="streak_sublabel", color=list(C_MUTED))
-                    dpg.add_spacer(height=6)
-                    dpg.add_text("", tag="wheel_sub", color=list(C_MUTED))
-                    dpg.add_spacer(height=8)
+                            dpg.add_spacer(height = 108)
+                            dpg.add_text("0", tag = "streak_number", color = list(C_BRIGHT))
+                            dpg.add_spacer(height = 4)
+                            dpg.add_text("day streak", tag = "streak_sublabel", color = list(C_MUTED))
+                    dpg.add_spacer(height = 6)
+                    dpg.add_text("", tag = "wheel_sub", color = list(C_MUTED))
+                    dpg.add_spacer(height = 8)
                     today_idx = date.today().weekday()
-                    with dpg.group(horizontal=True):
+                    with dpg.group(horizontal = True):
                         for i, d in enumerate(DAYS):
                             with dpg.group():
-                                dpg.add_text(d, color=list(C_BRIGHT if i == today_idx else C_MUTED))
+                                dpg.add_text(d, color = list(C_BRIGHT if i == today_idx else C_MUTED))
                                 dpg.add_input_float(
-                                    tag=f"day_target_{d}",
-                                    default_value=app_data["day_targets"].get(d, 6.0),
-                                    width=52, step=0, format="%.1f",
-                                    callback=lambda s, a, u: save_day_target(u[0], u[1]),
-                                    user_data=(d, f"day_target_{d}")
+                                    tag = f"day_target_{d}",
+                                    default_value = app_data["day_targets"].get(d, 6.0),
+                                    width = 52, step = 0, format = "%.1f",
+                                    callback = lambda s, a, u: save_day_target(u[0], u[1]),
+                                    user_data = (d, f"day_target_{d}")
                                 )
 
-                with dpg.child_window(width=500, height=315, border=True):
+                with dpg.child_window(width = 500, height = 315, border = True):
                     add_title("To-do")
-                    with dpg.child_window(height=225, border=False):
-                        with dpg.group(tag="todo_list"):
+                    with dpg.child_window(height = 225, border = False):
+                        with dpg.group(tag = "todo_list"):
                             pass
                     dpg.add_separator()
-                    with dpg.group(horizontal=True):
-                        dpg.add_input_text(tag="todo_text_input", hint="New task",
-                                           width=200, on_enter=True, callback=add_todo_cb)
-                        dpg.add_input_text(tag="todo_due_input", hint="YYYYMMDD",
-                                           width=100, callback=due_date_filter)
-                        a = dpg.add_button(label=" + ", callback=add_todo_cb)
+                    with dpg.group(horizontal = True):
+                        dpg.add_input_text(tag = "todo_text_input", hint = "New task",
+                                           width = 200, on_enter = True, callback = add_todo_cb)
+                        dpg.add_input_text(tag = "todo_due_input", hint = "YYYYMMDD",
+                                           width = 100, callback = due_date_filter)
+                        a = dpg.add_button(label = " + ", callback = add_todo_cb)
                         dpg.bind_item_theme(a, "accent_btn")
 
             with dpg.group():
-                with dpg.child_window(width=220, height=840, border=True):
+                with dpg.child_window(width = 220, height = 840, border = True):
                     add_title("Blocklist")
-                    dpg.add_spacer(height=4)
-                    dpg.add_text("Website blocking requires", color=list(C_MUTED))
-                    dpg.add_text("running as administrator.", color=list(C_MUTED))
-                    dpg.add_spacer(height=10)
+                    dpg.add_spacer(height = 4)
+                    dpg.add_text("Website blocking requires", color = list(C_MUTED))
+                    dpg.add_text("running as administrator.", color = list(C_MUTED))
+                    dpg.add_spacer(height = 10)
 
-                    dpg.add_text("Applications", color=list(C_BRIGHT))
+                    dpg.add_text("Applications", color = list(C_BRIGHT))
                     dpg.add_separator()
-                    dpg.add_spacer(height=4)
-                    with dpg.child_window(height=270, border=False):
-                        with dpg.group(tag="bl_app_list"):
+                    dpg.add_spacer(height = 4)
+                    with dpg.child_window(height = 250, border = False):
+                        with dpg.group(tag = "bl_app_list"):
                             pass
-                    with dpg.group(horizontal=True):
-                        dpg.add_input_text(tag="new_app_input", hint="app.exe",
-                                           width=148, on_enter=True, callback=add_banned_app)
-                        ba = dpg.add_button(label=" + ", callback=add_banned_app)
+                    with dpg.group(horizontal = True):
+                        dpg.add_input_text(tag = "new_app_input", hint = "app.exe",
+                                           width = 110, on_enter = True, callback = add_banned_app)
+                        ba = dpg.add_button(label = " + ", callback = add_banned_app)
                         dpg.bind_item_theme(ba, "accent_btn")
+                        bb = dpg.add_button(label = "Browse", callback = pick_app_from_shortcut)
+                        dpg.bind_item_theme(bb, "accent_btn")
 
-                    dpg.add_spacer(height=14)
-                    dpg.add_text("Websites", color=list(C_BRIGHT))
+                    dpg.add_spacer(height = 14)
+                    dpg.add_text("Websites", color = list(C_BRIGHT))
                     dpg.add_separator()
-                    dpg.add_spacer(height=4)
-                    with dpg.child_window(height=260, border=False):
-                        with dpg.group(tag="bl_site_list"):
+                    dpg.add_spacer(height = 4)
+                    with dpg.child_window(height = 260, border = False):
+                        with dpg.group(tag = "bl_site_list"):
                             pass
-                    with dpg.group(horizontal=True):
-                        dpg.add_input_text(tag="new_site_input", hint="reddit.com",
-                                           width=148, on_enter=True, callback=add_banned_site)
-                        bs = dpg.add_button(label=" + ", callback=add_banned_site)
+                    with dpg.group(horizontal = True):
+                        dpg.add_input_text(tag = "new_site_input", hint = "website.pizza",
+                                           width = 148, on_enter = True, callback = add_banned_site)
+                        bs = dpg.add_button(label = " + ", callback = add_banned_site)
                         dpg.bind_item_theme(bs, "accent_btn")
 
 
@@ -1053,8 +1150,8 @@ if __name__ == "__main__":
     load_data()
 
     dpg.create_context()
-    dpg.create_viewport(title="faceScanner", width=1450, height=880,
-                        min_width=1100, min_height=700)
+    dpg.create_viewport(title = "faceScanner", width = 1450, height = 880,
+                        min_width = 1100, min_height = 700)
 
     setup_themes()
     build_ui()
@@ -1067,8 +1164,8 @@ if __name__ == "__main__":
     dpg.show_viewport()
     dpg.set_primary_window("main", True)
 
-    threading.Thread(target=camera_thread,       daemon=True).start()
-    threading.Thread(target=blacklist_thread_fn, daemon=True).start()
+    threading.Thread(target = camera_thread,       daemon = True).start()
+    threading.Thread(target = blacklist_thread_fn, daemon = True).start()
 
     while dpg.is_dearpygui_running():
         tick()
