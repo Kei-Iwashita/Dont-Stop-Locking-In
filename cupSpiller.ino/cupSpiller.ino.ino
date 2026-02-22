@@ -127,7 +127,7 @@ void runTests() {
     myServo.write(0);  delay(800);
     delay(500);
 
-    Serial.println("TEST 4: Display - all segments on");
+    Serial.println("TEST 4: Display - all lights on");
     for (int i = 0; i < 4; i++) digitBuffer[i] = 0b11111111;
     runDisplayMs(1500);
 
@@ -146,7 +146,7 @@ void runTests() {
     for (int i = 0; i < 4; i++) digitBuffer[i] = SEG_BLANK;
     runDisplayMs(300);
 
-    Serial.println("Well what happened?");
+    Serial.println("IT WORKED");
 }
 
 void setup() {
