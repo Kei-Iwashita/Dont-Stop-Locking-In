@@ -55,8 +55,9 @@ PITCH_DOWN_THRESHOLD    = 15      #head tilting down angle
 IRIS_RATIO_MIN          = 0.35    #looking left
 IRIS_RATIO_MAX          = 0.65    #looking right
 EAR_THRESHOLD           = 0.18    #asians should make this lower if you have thin eyes (I'm asian dw)
-COUNTDOWN_SECS          = 120.0
+COUNTDOWN_SECS          = 300.0
 FLASH_SECS              = 5.0
+SERVO_OPEN_SECS         = 2.0     #how long to wait for the servo to fully open
 # --------------------
 
 CAM_W, CAM_H = 640, 480
@@ -490,9 +491,10 @@ def process_frame(frame):
             if remaining <= 0 and not servo_rotated:
                 send(b'X\n')
                 send(b'1\n')
-                servo_rotated  = True
+                servo_rotated = True
+                flash_overlay = False
+                time.sleep(SERVO_OPEN_SECS)  # give the servo time to fully open
                 session_failed = True
-                flash_overlay  = False
         else:
             if away_since is not None:
                 send(b'X\n')
