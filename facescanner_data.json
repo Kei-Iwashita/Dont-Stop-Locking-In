@@ -1,0 +1,26 @@
+{
+  "day_targets": {
+    "Mon": 6.0,
+    "Tue": 6.0,
+    "Wed": 6.0,
+    "Thu": 6.0,
+    "Fri": 6.0,
+    "Sat": 6.0,
+    "Sun": 6.0
+  },
+  "work_log": {
+    "2026-02-21": 538.5211725234985
+  },
+  "todos": [
+    {
+      "text": "Capstone Update",
+      "due": "9999-12-31",
+      "done": false
+    },
+    {
+      "text": "Fuck your mom",
+      "due": "9999-12-31",
+      "done": false
+    }
+  ]
+}
