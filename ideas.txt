@@ -1,0 +1,6 @@
+Productivity monitor. If you look away from your laptop, mediapipe or yolo will detect you are procrastinating and spill water on your laptop or yourself whichever is better. This will activate after 2 minutes of looking away. I also want an app that has the following:
+1. Custom amount of studying you want to do everyday
+2. A timer that goes 30 minutes work, 5 minutes break. Rinse and repeat. As you work, a progress bar or a circle fills up!
+3. To DO list with custom due dates.
+4. BLOCK APPLICATIONS LIKE GAMES AND BLOCK WEBSITES LIKE YOUTUBE REDDIT OR INSTAGRAM ALL CUSTAMIZABLE.
+5. Some reward system? some fireworks or shortening of study sessions. 
